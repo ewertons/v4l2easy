@@ -56,7 +56,8 @@ int main(void)
                     int i;
                     for (i = 0; i < count; i++)
                     {
-                        V4L2EASY_FRAME_SIZE_INFO* frame_sizes;
+                        int frame_size_count;
+                        struct v4l2_frmsizeenum** frame_sizes;
 
                         printf("\tindex: %d\r\n", formats[i]->index);
                         printf("\tdescription: %s\r\n", formats[i]->description);
@@ -65,7 +66,7 @@ int main(void)
                         printf("\tpixelformat: %d\r\n", formats[i]->pixelformat);
                         printf("\r\n");
 
-                        if (v4l2easy_get_device_supported_format_frame_sizes2(dev, formats[i], &frame_sizes) != 0)
+                        if (v4l2easy_get_device_supported_format_frame_sizes(dev, formats[i], &frame_sizes, &frame_size_count) != 0)
                         {
                             printf("Failed getting device format frame sizes\r\n");
                         }
@@ -73,19 +74,18 @@ int main(void)
                         {
                             printf("\tFrame sizes:\r\n");
 
-                            V4L2EASY_FRAME_SIZE_INFO* frame_size = frame_sizes;
-
-                            while (frame_size != NULL)
+                            int j;
+                            for (j = 0; j < frame_size_count; j++)
                             {
-                                printf("\t\t[%d]: ", frame_size->info.index);
+                                printf("\t\t[%d]: ", frame_sizes[j]->index);
 
-                                if (frame_size->info.type == V4L2_FRMSIZE_TYPE_DISCRETE)
+                                if (frame_sizes[j]->type == V4L2_FRMSIZE_TYPE_DISCRETE)
                                 {
-                                    printf("%dx%d", frame_size->info.discrete.width, frame_size->info.discrete.height);
+                                    printf("%dx%d", frame_sizes[j]->discrete.width, frame_sizes[j]->discrete.height);
                                 }
-                                else if (frame_size->info.type == V4L2_FRMSIZE_TYPE_STEPWISE)
+                                else if (frame_sizes[j]->type == V4L2_FRMSIZE_TYPE_STEPWISE)
                                 {
-                                    printf("%dx%d", frame_size->info.stepwise.max_width, frame_size->info.stepwise.max_height);
+                                    printf("%dx%d", frame_sizes[j]->stepwise.max_width, frame_sizes[j]->stepwise.max_height);
                                 }
                                 else
                                 {
@@ -93,10 +93,7 @@ int main(void)
                                 }
 
                                 printf("\r\n");
-                                frame_size = frame_size->next;
                             }
-
-                            v4l2easy_destroy_format_frame_size_list(frame_sizes);
                         }
                     }
                 }
