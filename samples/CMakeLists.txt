@@ -1,0 +1,1 @@
+add_subdirectory(list_and_get_info)
