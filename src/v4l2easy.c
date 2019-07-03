@@ -3,11 +3,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include "circular_list.h"
 
 #define DEVICES_ROOT_PATH "/dev"
 #define DEVICES_ROOT_PATH_LENGTH 4
 #define VIDEO_DEVICE_NAME_FILTER "video"
 #define VIDEO_DEVICE_NAME_FILTER_LENGTH 5 
+
+#define MAX_DEVICE_FORMAT_COUNT 100
+#define MAX_DEVICE_FRAME_SIZE_COUNT 100
 
 typedef struct V4L2EASY_DATA_STRUCT
 {
@@ -210,8 +214,6 @@ int v4l2easy_get_device_capability(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_
     }
 }
 
-#define MAX_DEVICE_FORMAT_COUNT 100
-
 int v4l2easy_get_device_supported_formats(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_fmtdesc*** formats, unsigned int* count)
 {
     int result;
@@ -284,7 +286,16 @@ int v4l2easy_get_device_supported_formats(V4L2EASY_HANDLE v4l2easy_handle, struc
     return result;
 }
 
-#define MAX_DEVICE_FRAME_SIZE_COUNT 100
+static bool destroy_every_item_in_list(LIST_NODE_HANDLE node, void* context, bool* continue_processing)
+{
+	(void)context;
+	struct v4l2_frmsizeenum* frame_size = (struct v4l2_frmsizeenum*)circular_list_node_get_value(node);
+	
+	free(frame_size);
+	
+	*continue_processing = true;
+	return true;
+}
 
 int v4l2easy_get_device_supported_format_frame_sizes(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_fmtdesc* format, struct v4l2_frmsizeenum*** frame_sizes, unsigned int* count)
 {
@@ -295,65 +306,77 @@ int v4l2easy_get_device_supported_format_frame_sizes(V4L2EASY_HANDLE v4l2easy_ha
         result = __LINE__;
     }
     else
-    {
-        V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
-        int index;
-        struct v4l2_frmsizeenum** temp_frame_sizes = NULL;
-        int temp_count = 0;
+	{
+		CIRCULAR_LIST_HANDLE list = circular_list_create();
+		
+		if (list == NULL)
+		{
+			result = __LINE__;
+		}
+		else
+		{
+			V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+			int index;
 
-        result = 0;
+			result = 0;
 
-        for (index = 0; index < MAX_DEVICE_FRAME_SIZE_COUNT; index++)
-        {
-            struct v4l2_frmsizeenum* frame_size = malloc(sizeof(struct v4l2_frmsizeenum));
+			for (index = 0; index < MAX_DEVICE_FRAME_SIZE_COUNT; index++)
+			{
+				struct v4l2_frmsizeenum* frame_size = malloc(sizeof(struct v4l2_frmsizeenum));
 
-            if (frame_size == NULL)
-            {
-                result = __LINE__;
-                break;
-            }
-            else
-            {
-                frame_size->index = index;
-                frame_size->pixel_format = format->pixelformat;    
+				if (frame_size == NULL)
+				{
+					result = __LINE__;
+					break;
+				}
+				else
+				{
+					frame_size->index = index;
+					frame_size->pixel_format = format->pixelformat;    
 
-                if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_ENUM_FRAMESIZES, frame_size) >= 0)
-                {
-                    if ((temp_frame_sizes = realloc(temp_frame_sizes, temp_count + 1)) == NULL)
-                    {
-                        free(frame_size);
-                        result = __LINE__;
-                        break;                        
-                    }
-                    else
-                    {
-                        temp_frame_sizes[temp_count] = frame_size;
-                        temp_count++;
-                    }
-                }
-                else
-                {
-                    free(frame_size);
-                    break;
-                }         
-            }
-        }
+					if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_ENUM_FRAMESIZES, frame_size) >= 0)
+					{
+						if (circular_list_add(list, frame_size) == NULL)
+						{
+							free(frame_size);
+							result = __LINE__;
+							break;                        
+						}
+					}
+					else
+					{
+						free(frame_size);
+						break;
+					}         
+				}
+			}
 
-        if (result != 0)
-        {
-            while(temp_count > 0)
-            {
-                temp_count--;
-                free(temp_frame_sizes[temp_count]);
-            }
-            free(temp_frame_sizes);
-        }
-        else
-        {
-            *frame_sizes = temp_frame_sizes;
-            *count = temp_count;
-        }
-    }
+			if (result == 0)	
+			{
+				void** temp_frame_sizes;
+				int temp_count;
+				
+				if (circular_list_to_array(list, &temp_frame_sizes, &temp_count) != 0)
+				{
+					result = __LINE__;
+				}
+				else
+				{
+					*count = temp_count;
+					*frame_sizes = (struct v4l2_frmsizeenum**)temp_frame_sizes;
+				}
+			}
+			
+			if (result != 0)
+			{
+				(void)circular_list_remove_if(list, destroy_every_item_in_list, NULL);
+			}
+			
+			circular_list_destroy(list);
+		}
+	}
 
     return result;
 }
+
+void v4l2easy_set_capture_preferences();

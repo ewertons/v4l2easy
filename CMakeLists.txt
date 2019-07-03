@@ -12,11 +12,14 @@ set(source_files
     ./src/v4l2easy.c
 )
 
+include_directories(deps/common-lib-c/inc/)
+
 add_library(v4l2easy ${header_files} ${source_files})
 
 include_directories(./inc)
 
 target_link_libraries(v4l2easy 
+    common-lib-c
 )
 
 add_subdirectory(samples)
