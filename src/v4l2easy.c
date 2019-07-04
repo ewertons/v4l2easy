@@ -2,7 +2,10 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <linux/videodev2.h>
+#include <sys/mman.h>
 #include "circular_list.h"
 
 #define DEVICES_ROOT_PATH "/dev"
@@ -16,6 +19,10 @@
 typedef struct V4L2EASY_DATA_STRUCT
 {
     int file_descriptor;
+	struct v4l2_buffer v4l2_buf;
+	int buffer_count;
+	char **buffers;
+	unsigned int* buffers_length;
 } V4L2EASY_DATA;
 
 static char* get_full_device_path(char* str1)
@@ -136,6 +143,10 @@ V4L2EASY_HANDLE v4l2easy_open_device(char* device_path)
     }
     else
     {
+		result->buffers = NULL;
+		result->buffers_length = NULL;
+		memset(&result->v4l2_buf, 0, sizeof(struct v4l2_buffer));
+
         result->file_descriptor = open(device_path, O_RDWR);
 
         if (result->file_descriptor < 0)
@@ -379,4 +390,275 @@ int v4l2easy_get_device_supported_format_frame_sizes(V4L2EASY_HANDLE v4l2easy_ha
     return result;
 }
 
-void v4l2easy_set_capture_preferences();
+int v4l2easy_get_format(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_format* format)
+{
+	int result;
+
+    if (v4l2easy_handle == NULL || format == NULL)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+		
+		if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_G_FMT, format) != 0)
+		{
+			result = __LINE__;
+		}
+		else
+		{
+			result = 0;
+		}
+	}
+	
+	return result;
+}
+
+int v4l2easy_set_format(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_format* format)
+{
+	int result;
+
+    if (v4l2easy_handle == NULL || format == NULL)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+		
+		if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_S_FMT, format) != 0)
+		{
+			result = __LINE__;
+		}
+		else
+		{
+			result = 0;
+		}
+	}
+	
+	return result;
+}
+
+#define MAX_BUFFER_COUNT 64
+
+static int create_buffers(V4L2EASY_DATA* v4l2easy_data, struct v4l2_requestbuffers* reqbuf)
+{
+	int result;
+	
+	v4l2easy_data->buffer_count = reqbuf->count;
+	
+	if ((v4l2easy_data->buffers = malloc(sizeof(char*) * v4l2easy_data->buffer_count)) == NULL)
+	{
+		result = __LINE__;
+	}
+	else if ((v4l2easy_data->buffers_length = malloc(sizeof(unsigned int) * v4l2easy_data->buffer_count)) == NULL)
+	{
+		free(v4l2easy_data->buffers);
+		v4l2easy_data->buffers = NULL;
+		result = __LINE__;
+	}
+	else
+	{
+		result = 0;
+	}
+	
+	return result;
+}
+
+static void destroy_buffers(V4L2EASY_DATA* v4l2easy_data)
+{
+	free(v4l2easy_data->buffers);
+	v4l2easy_data->buffers = NULL;
+	
+	free(v4l2easy_data->buffers_length);
+	v4l2easy_data->buffers_length = NULL;
+}
+
+int v4l2easy_start_camera(V4L2EASY_HANDLE v4l2easy_handle)
+{
+	int result;
+
+    if (v4l2easy_handle == NULL)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+		V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+
+		if (v4l2easy_data->buffers != NULL)
+		{
+			// Already started.
+			result = __LINE__;
+		}
+		else
+		{
+			struct v4l2_requestbuffers reqbuf;
+			reqbuf.count = MAX_BUFFER_COUNT;
+			reqbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			reqbuf.memory = V4L2_MEMORY_MMAP;
+
+			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_REQBUFS, &reqbuf) != 0)
+			{
+				result = __LINE__;
+			}
+			else if (create_buffers(v4l2easy_data, &reqbuf) != 0)
+			{
+				result = __LINE__;
+			}
+			else
+			{
+				int i;
+				struct v4l2_buffer v4l2_buf;
+				
+				result = 0;
+
+				for (i = 0; i < v4l2easy_data->buffer_count; i++)
+				{
+					memset(&v4l2easy_data->v4l2_buf, 0, sizeof(struct v4l2_buffer));
+
+					v4l2easy_data->v4l2_buf.index = i;
+					v4l2easy_data->v4l2_buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+					v4l2easy_data->v4l2_buf.memory = V4L2_MEMORY_MMAP;
+
+					if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QUERYBUF, v4l2easy_data->v4l2_buf) != 0)
+					{
+						printf("VIDIOC_QUERYBUF %d, failed : %s\n", i, strerror(errno));
+						result = __LINE__;
+						break;
+					}
+
+					// Map buffers.
+					v4l2easy_data->buffers_length[i] = v4l2easy_data->v4l2_buf.length;
+					v4l2easy_data->buffers[i] = (char *)mmap(0, v4l2easy_data->v4l2_buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, v4l2easy_data->file_descriptor, v4l2easy_data->v4l2_buf.m.offset);
+
+					if (v4l2easy_data->buffers[i] == MAP_FAILED)
+					{
+						printf("mmap (%d) failed : %s\n", i, strerror(errno));
+						result = __LINE__;
+						break;
+					}
+					else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, v4l2easy_data->v4l2_buf) != 0)
+					{
+						printf("VIDIOC_QBUF (%d) failed : %s \n", i, strerror(errno));
+						result = __LINE__;
+						break;
+					}
+				}
+
+				if (result == 0)
+				{
+					// Start recording.
+					enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+					if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_STREAMON, &type) != 0)
+					{
+						printf("VIDIOC_STREAMON failed : %s\n", strerror(errno));
+						result = __LINE__;
+					}
+				}
+				
+				if (result != 0)
+				{
+					while (i > 0)
+					{
+						i--;
+						munmap(v4l2easy_data->buffers[i], v4l2easy_data->buffers_length[i]);
+					}
+					
+					destroy_buffers(v4l2easy_data);					
+				}
+			}
+		}
+	}
+	
+	return result;
+}
+
+int v4l2easy_capture(V4L2EASY_HANDLE v4l2easy_handle, unsigned char** frame_data, unsigned int* size)
+{
+	int result;
+
+    if (v4l2easy_handle == NULL || frame_data == NULL || size == NULL)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+
+		if (v4l2easy_data->buffers == NULL)
+		{	
+			result = __LINE__;
+		}
+		else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_DQBUF, v4l2easy_data->v4l2_buf) != 0)
+		{
+			result = __LINE__;
+		}
+		else if ((*frame_data = malloc(sizeof(unsigned char) * v4l2easy_data->v4l2_buf.bytesused)) == NULL)
+		{
+			result = __LINE__;
+		}
+		else
+		{
+			memcpy(*frame_data, v4l2easy_data->buffers[v4l2easy_data->v4l2_buf.index], v4l2easy_data->v4l2_buf.bytesused);
+			
+			// Re-queue buffer
+			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, v4l2easy_data->v4l2_buf) != 0)
+			{
+				// TODO: cleanup and reset? or track if failure occured?
+				free(*frame_data);
+				*frame_data = NULL;
+				result = __LINE__;
+			}
+			else
+			{
+				*size = v4l2easy_data->v4l2_buf.bytesused;
+				result = 0;
+			}
+		}
+	}
+	
+	return result;
+}
+
+int v4l2easy_stop_camera(V4L2EASY_HANDLE v4l2easy_handle)
+{
+	int result;
+
+    if (v4l2easy_handle == NULL)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        V4L2EASY_DATA* v4l2easy_data = (V4L2EASY_DATA*)v4l2easy_handle;
+		
+		if (v4l2easy_data->buffers == NULL)
+		{
+			result = __LINE__;
+		}
+		else
+		{		
+			enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			int i;
+
+			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_STREAMOFF, &type) != 0)
+			{
+				printf("VIDIOC_STREAMOFF failed : %s\n", strerror(errno));
+			}
+
+			for (i = 0; i < v4l2easy_data->buffer_count; i++)
+			{
+				munmap(v4l2easy_data->buffers[i], v4l2easy_data->buffers_length[i]);
+			}
+			
+			destroy_buffers(v4l2easy_data);
+			
+			result = 0;
+		}
+	}
+	
+	return result;
+}
