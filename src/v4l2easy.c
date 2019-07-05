@@ -227,6 +227,9 @@ int v4l2easy_get_device_capability(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_
 
 int v4l2easy_get_device_supported_formats(V4L2EASY_HANDLE v4l2easy_handle, struct v4l2_fmtdesc*** formats, unsigned int* count)
 {
+	// For pixelformats, see:
+	// https://www.kernel.org/doc/html/v4.13/media/uapi/v4l/pixfmt-packed-rgb.html
+	// https://www.kernel.org/doc/html/v4.13/media/uapi/v4l/videodev.html#videodev
     int result;
 
     if (v4l2easy_handle == NULL || formats == NULL || count == NULL)
@@ -522,7 +525,7 @@ int v4l2easy_start_camera(V4L2EASY_HANDLE v4l2easy_handle)
 					v4l2easy_data->v4l2_buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 					v4l2easy_data->v4l2_buf.memory = V4L2_MEMORY_MMAP;
 
-					if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QUERYBUF, v4l2easy_data->v4l2_buf) != 0)
+					if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QUERYBUF, &v4l2easy_data->v4l2_buf) != 0)
 					{
 						printf("VIDIOC_QUERYBUF %d, failed : %s\n", i, strerror(errno));
 						result = __LINE__;
@@ -539,7 +542,7 @@ int v4l2easy_start_camera(V4L2EASY_HANDLE v4l2easy_handle)
 						result = __LINE__;
 						break;
 					}
-					else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, v4l2easy_data->v4l2_buf) != 0)
+					else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, &v4l2easy_data->v4l2_buf) != 0)
 					{
 						printf("VIDIOC_QBUF (%d) failed : %s \n", i, strerror(errno));
 						result = __LINE__;
@@ -592,7 +595,7 @@ int v4l2easy_capture(V4L2EASY_HANDLE v4l2easy_handle, unsigned char** frame_data
 		{	
 			result = __LINE__;
 		}
-		else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_DQBUF, v4l2easy_data->v4l2_buf) != 0)
+		else if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_DQBUF, &v4l2easy_data->v4l2_buf) != 0)
 		{
 			result = __LINE__;
 		}
@@ -605,7 +608,7 @@ int v4l2easy_capture(V4L2EASY_HANDLE v4l2easy_handle, unsigned char** frame_data
 			memcpy(*frame_data, v4l2easy_data->buffers[v4l2easy_data->v4l2_buf.index], v4l2easy_data->v4l2_buf.bytesused);
 			
 			// Re-queue buffer
-			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, v4l2easy_data->v4l2_buf) != 0)
+			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, &v4l2easy_data->v4l2_buf) != 0)
 			{
 				// TODO: cleanup and reset? or track if failure occured?
 				free(*frame_data);
