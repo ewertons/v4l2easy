@@ -1,3 +1,5 @@
 add_subdirectory(list_and_get_info)
 add_subdirectory(capture_single_frame_raw)
+add_subdirectory(capture_single_frame_mjpeg)
+
 
