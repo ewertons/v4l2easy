@@ -606,6 +606,7 @@ int v4l2easy_capture(V4L2EASY_HANDLE v4l2easy_handle, unsigned char** frame_data
 		else
 		{
 			memcpy(*frame_data, v4l2easy_data->buffers[v4l2easy_data->v4l2_buf.index], v4l2easy_data->v4l2_buf.bytesused);
+			*size = v4l2easy_data->v4l2_buf.bytesused; // All data must be retrieved from v4l2_buf before VIDIOC_QBUF below, as it erases the struct data.
 			
 			// Re-queue buffer
 			if (ioctl(v4l2easy_data->file_descriptor, VIDIOC_QBUF, &v4l2easy_data->v4l2_buf) != 0)
@@ -613,11 +614,11 @@ int v4l2easy_capture(V4L2EASY_HANDLE v4l2easy_handle, unsigned char** frame_data
 				// TODO: cleanup and reset? or track if failure occured?
 				free(*frame_data);
 				*frame_data = NULL;
+				*size = 0;
 				result = __LINE__;
 			}
 			else
 			{
-				*size = v4l2easy_data->v4l2_buf.bytesused;
 				result = 0;
 			}
 		}
